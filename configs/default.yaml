@@ -1,0 +1,47 @@
+# Default configuration for federated ADMET demo
+
+# TDC ADMET task. Options include (regression):
+#   Caco2_Wang, Lipophilicity_AstraZeneca, Solubility_AqSolDB, PPBR_AZ, VDss_Lombardo,
+#   Half_Life_Obach, Clearance_Hepatocyte_AZ, Clearance_Microsome_AZ, LD50_Zhu
+# And (classification):
+#   HIA_Hou, Pgp_Broccatelli, Bioavailability_Ma, BBB_Martins, CYP2D6_Veith, etc.
+task: Caco2_Wang
+
+# Federation settings
+federation:
+  num_clients: 3
+  num_rounds: 10
+  local_epochs: 5
+  fraction_fit: 1.0          # fraction of clients sampled per round
+  fraction_eval: 1.0
+  partition_strategy: random  # 'random' or 'scaffold' (scaffold = harder, more realistic)
+  seed: 42
+
+# Model
+model:
+  hidden_dim: 64
+  num_layers: 3
+  dropout: 0.2
+
+# Local training
+training:
+  batch_size: 32
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+
+# Differential privacy (server-side, DP-FedAvg style). Set enabled=false for the
+# vanilla FedAvg baseline. With small clip_norm + larger noise_multiplier you
+# trade utility for privacy; values below are a moderate starting point.
+differential_privacy:
+  enabled: false
+  clip_norm: 1.0
+  noise_multiplier: 0.5
+
+# Membership inference attack
+attack:
+  num_shadow_models: 5
+  shadow_epochs: 50
+  attack_model: gradient_boosting  # or 'logistic_regression'
+
+# Output
+output_dir: outputs
