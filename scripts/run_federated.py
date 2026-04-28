@@ -150,6 +150,22 @@ def main() -> None:
             f"\nDifferential privacy ENABLED: clip_norm={dp_cfg['clip_norm']}, "
             f"noise_multiplier={dp_cfg['noise_multiplier']}"
         )
+        # Compute and print the formal (epsilon, delta)-DP guarantee.
+        try:
+            from src.privacy import compute_dp_fedavg_epsilon
+            budget = compute_dp_fedavg_epsilon(
+                noise_multiplier=dp_cfg["noise_multiplier"],
+                num_rounds=num_rounds,
+                target_delta=1e-5,
+                sampling_rate=config["federation"]["fraction_fit"],
+            )
+            print(f"Privacy budget: {budget}")
+        except ImportError:
+            print(
+                "  (Install dp-accounting to see formal (epsilon, delta) guarantees: "
+                "pip install dp-accounting)"
+            )
+            budget = None
         strategy = make_dp_strategy(
             initial_parameters=initial_parameters,
             clip_norm=dp_cfg["clip_norm"],
@@ -160,6 +176,7 @@ def main() -> None:
         )
         default_tag = "dp"
     else:
+        budget = None
         strategy = make_strategy(
             initial_parameters=initial_parameters,
             fraction_fit=config["federation"]["fraction_fit"],
@@ -224,6 +241,7 @@ def main() -> None:
             "config": config,
             "state_dict": final_model.state_dict(),
             "test_metrics": test_metrics,
+            "privacy_budget": budget.__dict__ if budget is not None else None,
         },
         ckpt_path,
     )
@@ -237,6 +255,8 @@ def main() -> None:
                 "num_clients": num_clients,
                 "num_rounds": num_rounds,
                 "partition_strategy": partition_strategy,
+                "differential_privacy": dp_cfg,
+                "privacy_budget": budget.__dict__ if budget is not None else None,
                 "test_metrics": test_metrics,
                 "losses_distributed": history.losses_distributed,
                 "metrics_distributed_fit": history.metrics_distributed_fit,
