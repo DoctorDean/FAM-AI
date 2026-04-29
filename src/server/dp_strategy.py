@@ -116,57 +116,56 @@ class DPFedAvg(CheckpointingFedAvg):
         )
 
     def aggregate_fit(
-        self,
-        server_round: int,
-        results: list[tuple[ClientProxy, FitRes]],
-        failures: list,
+            self,
+            server_round: int,
+            results: list[tuple[ClientProxy, FitRes]],
+            failures: list,
     ) -> tuple[Parameters | None, dict[str, Any]]:
         if not results:
             return None, {}
         if self._previous_global is None:
-            # First round: take whatever the first client sent as a reference.
             self._previous_global = parameters_to_ndarrays(results[0][1].parameters)
 
         prev = self._previous_global
+        n_clients = len(results)
 
-        # Compute, clip, and re-package each client's *update* (delta from prev).
-        clipped_results: list[tuple[ClientProxy, FitRes]] = []
+        # Compute and clip each client's update (delta from prev).
+        clipped_updates: list[list[np.ndarray]] = []
+        total_examples = 0
         for client_proxy, fit_res in results:
             new_params = parameters_to_ndarrays(fit_res.parameters)
             update = [n - p for n, p in zip(new_params, prev)]
             clipped = _clip_update(update, self.clip_norm)
-            clipped_params = [p + c for p, c in zip(prev, clipped)]
-            new_fit_res = FitRes(
-                status=fit_res.status,
-                parameters=ndarrays_to_parameters(clipped_params),
-                num_examples=fit_res.num_examples,
-                metrics=fit_res.metrics,
-            )
-            clipped_results.append((client_proxy, new_fit_res))
+            clipped_updates.append(clipped)
+            total_examples += fit_res.num_examples
 
-        # Standard FedAvg over clipped updates.
-        aggregated_params, aggregated_metrics = super().aggregate_fit(
-            server_round, clipped_results, failures
-        )
-        if aggregated_params is None:
-            return None, aggregated_metrics
+        # Sum clipped updates element-wise.
+        summed_update = [np.zeros_like(arr) for arr in prev]
+        for client_update in clipped_updates:
+            for i, arr in enumerate(client_update):
+                summed_update[i] += arr
 
-        # Add Gaussian noise to the AVERAGED update.
-        # Noise std for the average = (noise_multiplier * clip_norm) / num_clients.
-        # Equivalently: add std (noise_multiplier * clip_norm) to the *sum*, then
-        # divide by num_clients — same effect after the FedAvg averaging.
-        n_clients = len(clipped_results)
-        if self.noise_multiplier > 0 and n_clients > 0:
-            noise_std = (self.noise_multiplier * self.clip_norm) / n_clients
-            aggregated_arrays = parameters_to_ndarrays(aggregated_params)
-            noisy = [a + np.random.normal(0.0, noise_std, size=a.shape).astype(a.dtype)
-                     for a in aggregated_arrays]
-            aggregated_params = ndarrays_to_parameters(noisy)
+        # Add Gaussian noise to the SUM of clipped updates with std = sigma * C.
+        if self.noise_multiplier > 0:
+            noise_std = self.noise_multiplier * self.clip_norm
+            summed_update = [
+                arr + np.random.normal(0.0, noise_std, size=arr.shape).astype(arr.dtype)
+                for arr in summed_update
+            ]
 
-        # Track for next round's update calculations and for checkpointing.
-        self._previous_global = parameters_to_ndarrays(aggregated_params)
+        # Average to get the noisy mean update, then apply to previous global.
+        averaged_update = [arr / n_clients for arr in summed_update]
+        new_global = [p + u for p, u in zip(prev, averaged_update)]
+
+        # Build aggregated metrics the same way the parent class would.
+        aggregated_metrics: dict[str, Any] = {}
+        if self.fit_metrics_aggregation_fn:
+            fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
+            aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
+
+        aggregated_params = ndarrays_to_parameters(new_global)
+        self._previous_global = new_global
         self.latest_parameters = aggregated_params
-
         return aggregated_params, aggregated_metrics
 
 
