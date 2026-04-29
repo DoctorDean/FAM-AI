@@ -29,7 +29,7 @@ Thumbs.db
 
 # Project outputs
 outputs/
-data/
+/data/
 checkpoints/
 *.pt
 *.pth
