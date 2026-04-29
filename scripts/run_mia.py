@@ -28,7 +28,7 @@ import torch
 import yaml
 
 from src.attacks import run_membership_inference
-from src.utils import (
+from src.data import (
     ATOM_FEATURE_DIM,
     REGRESSION_TASKS,
     load_admet_task,

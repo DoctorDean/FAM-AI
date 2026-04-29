@@ -26,7 +26,7 @@ from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays
 from torch_geometric.loader import DataLoader
 
 from src.client import make_client_fn
-from src.utils import (
+from src.data import (
     ATOM_FEATURE_DIM,
     REGRESSION_TASKS,
     load_admet_task,

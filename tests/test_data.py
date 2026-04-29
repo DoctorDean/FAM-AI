@@ -9,7 +9,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.utils.loader import _random_partition, _scaffold_partition
+from src.data.loader import _random_partition, _scaffold_partition
 
 
 def _toy_df(n: int = 30) -> pd.DataFrame:
