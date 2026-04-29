@@ -1,11 +1,11 @@
 """Data loading, partitioning, and featurisation for ADMET tasks."""
-from src.data.featurization import (
+from src.utils.featurization import (
     ATOM_FEATURE_DIM,
     BOND_FEATURE_DIM,
     smiles_list_to_graphs,
     smiles_to_graph,
 )
-from src.data.loader import (
+from src.utils.loader import (
     CLASSIFICATION_TASKS,
     REGRESSION_TASKS,
     ADMETData,

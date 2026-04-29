@@ -21,7 +21,7 @@ import torch
 import yaml
 from torch_geometric.loader import DataLoader
 
-from src.data import (
+from src.utils import (
     ATOM_FEATURE_DIM,
     REGRESSION_TASKS,
     load_admet_task,

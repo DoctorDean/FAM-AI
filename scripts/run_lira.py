@@ -27,7 +27,7 @@ import torch
 import yaml
 
 from src.attacks import run_lira
-from src.data import (
+from src.utils import (
     ATOM_FEATURE_DIM,
     REGRESSION_TASKS,
     load_admet_task,

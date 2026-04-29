@@ -7,7 +7,7 @@ rdkit = pytest.importorskip("rdkit", reason="RDKit not installed")
 torch = pytest.importorskip("torch")
 torch_geometric = pytest.importorskip("torch_geometric")
 
-from src.data.featurization import (  # noqa: E402
+from src.utils.featurization import (  # noqa: E402
     ATOM_FEATURE_DIM,
     BOND_FEATURE_DIM,
     smiles_list_to_graphs,
