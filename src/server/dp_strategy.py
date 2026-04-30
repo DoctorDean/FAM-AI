@@ -92,6 +92,19 @@ class DPFedAvg(CheckpointingFedAvg):
         Setting `noise_multiplier=0.0` gives you plain clipping with no noise —
         useful as an ablation to separate the effect of clipping (which alone
         provides some empirical robustness) from the effect of noise.
+
+    Implements the standard DP-FedAvg recipe (McMahan et al. 2018):
+        1. Each client trains locally
+        2. Server computes per-client update = client_weights - broadcast_weights
+        3. Each update is L2-clipped to clip_norm
+        4. Clipped updates are summed
+        5. Gaussian noise N(0, (sigma*C)^2) is added to the sum
+        6. Noisy sum is averaged across clients
+        7. Averaged update is applied to broadcast_weights to form new global
+
+    The crucial detail is step 2: the "previous global" used in the subtraction
+    must be the parameters the SERVER BROADCAST to clients at the start of the
+    round, not anything else. Capturing this requires hooking configure_fit.
     """
 
     def __init__(
@@ -107,45 +120,48 @@ class DPFedAvg(CheckpointingFedAvg):
             raise ValueError(f"noise_multiplier must be >= 0, got {noise_multiplier}")
         self.clip_norm = clip_norm
         self.noise_multiplier = noise_multiplier
-        # Cache the most recent global parameters so we can compute updates
-        # (post-training weights minus pre-training weights).
-        self._previous_global: list[np.ndarray] | None = (
-            parameters_to_ndarrays(kwargs["initial_parameters"])
-            if "initial_parameters" in kwargs and kwargs["initial_parameters"] is not None
-            else None
-        )
+        # Capture the parameters broadcast at the start of each round, so that
+        # in aggregate_fit we know exactly what each client's "previous global"
+        # was. Without this, we'd have to reconstruct it from client returns,
+        # which is fragile and produced silent corruption in earlier versions.
+        self._round_broadcast_params: list[np.ndarray] | None = None
+
+    def configure_fit(self, server_round, parameters, client_manager):
+        """Capture the broadcast parameters before delegating to FedAvg."""
+        self._round_broadcast_params = parameters_to_ndarrays(parameters)
+        return super().configure_fit(server_round, parameters, client_manager)
 
     def aggregate_fit(
-            self,
-            server_round: int,
-            results: list[tuple[ClientProxy, FitRes]],
-            failures: list,
+        self,
+        server_round: int,
+        results: list[tuple[ClientProxy, FitRes]],
+        failures: list,
     ) -> tuple[Parameters | None, dict[str, Any]]:
         if not results:
             return None, {}
-        if self._previous_global is None:
-            self._previous_global = parameters_to_ndarrays(results[0][1].parameters)
+        if self._round_broadcast_params is None:
+            raise RuntimeError(
+                "configure_fit was not called before aggregate_fit; "
+                "DP-FedAvg cannot determine the per-round broadcast parameters."
+            )
 
-        prev = self._previous_global
+        prev = self._round_broadcast_params
         n_clients = len(results)
 
-        # Compute and clip each client's update (delta from prev).
+        # Per-client clipped updates.
         clipped_updates: list[list[np.ndarray]] = []
-        total_examples = 0
-        for client_proxy, fit_res in results:
+        for _, fit_res in results:
             new_params = parameters_to_ndarrays(fit_res.parameters)
             update = [n - p for n, p in zip(new_params, prev)]
-            clipped = _clip_update(update, self.clip_norm)
-            clipped_updates.append(clipped)
-            total_examples += fit_res.num_examples
+            clipped_updates.append(_clip_update(update, self.clip_norm))
 
-        # Sum clipped updates element-wise.
+        # Sum clipped updates.
         summed_update = [np.zeros_like(arr) for arr in prev]
         for client_update in clipped_updates:
             for i, arr in enumerate(client_update):
                 summed_update[i] += arr
 
-        # Add Gaussian noise to the SUM of clipped updates with std = sigma * C.
+        # Noise the sum (sensitivity = clip_norm, so std = sigma * clip_norm).
         if self.noise_multiplier > 0:
             noise_std = self.noise_multiplier * self.clip_norm
             summed_update = [
@@ -153,18 +169,17 @@ class DPFedAvg(CheckpointingFedAvg):
                 for arr in summed_update
             ]
 
-        # Average to get the noisy mean update, then apply to previous global.
+        # Average and apply.
         averaged_update = [arr / n_clients for arr in summed_update]
         new_global = [p + u for p, u in zip(prev, averaged_update)]
 
-        # Build aggregated metrics the same way the parent class would.
+        # Aggregate fit-side metrics for logging.
         aggregated_metrics: dict[str, Any] = {}
         if self.fit_metrics_aggregation_fn:
             fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
             aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
 
         aggregated_params = ndarrays_to_parameters(new_global)
-        self._previous_global = new_global
         self.latest_parameters = aggregated_params
         return aggregated_params, aggregated_metrics
 
